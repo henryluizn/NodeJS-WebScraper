@@ -1,22 +1,34 @@
 const axios = require('axios');
-const cheerio = require('cheerio');
 const fs = require('fs');
 const path = require('path');
 
-const url = 'https://geoserver.car.gov.br/geoserver/web/wicket/bookmarkable/org.geoserver.web.demo.MapPreviewPage?1';
+// Lista das siglas dos estados brasileiros
+const siglaEstados = [
+  'ac', 'al', 'am', 'ap', 'ba', 'ce', 'df', 'es', 'go', 'ma',
+  'mg', 'ms', 'mt', 'pa', 'pb', 'pe', 'pi', 'pr', 'rj', 'rn',
+  'ro', 'rr', 'rs', 'sc', 'se', 'sp', 'to'
+];
 
-// Função para baixar o arquivo CSV a partir de um link
-async function downloadCSV(link, fileName) {
-  const filePath = path.resolve(__dirname, 'downloads', fileName);
+// Tipo de arquivo que será baixado (pode ser 'csv', 'json', etc.)
+const tipoArquivo = 'csv';
+
+// Cria a pasta downloads se ela ainda não existir
+const downloadDir = path.resolve(__dirname, 'downloads');
+if (!fs.existsSync(downloadDir)) {
+  fs.mkdirSync(downloadDir);
+}
+
+// Função para fazer download de um arquivo e salvá-lo
+async function downloadFile(url, fileName) {
+  const filePath = path.resolve(downloadDir, fileName);
   const writer = fs.createWriteStream(filePath);
 
   const response = await axios({
-    url: link,
+    url,
     method: 'GET',
-    responseType: 'stream',
+    responseType: 'stream'
   });
 
-  // Escreve o arquivo baixado no sistema de arquivos
   response.data.pipe(writer);
 
   return new Promise((resolve, reject) => {
@@ -25,54 +37,28 @@ async function downloadCSV(link, fileName) {
   });
 }
 
-// Função para carregar os dados da página e baixar os arquivos CSV
-async function downloadCSVFiles() {
-  // Cria a pasta 'downloads' caso não exista
-  const downloadDir = path.resolve(__dirname, 'downloads');
-  if (!fs.existsSync(downloadDir)) {
-    fs.mkdirSync(downloadDir);
-  }
+// Função principal que itera sobre os estados e baixa os arquivos
+async function downloadFiles() {
+  for (let index = 0; index < siglaEstados.length; index++) {
+    const sigla = siglaEstados[index];
 
-  try {
-    // Faz a requisição à página que contém os links para os CSVs
-    const { data } = await axios.get(url);
+    // Monta a URL para o download
+    const url = `https://geoserver.car.gov.br/geoserver/sicar/ows?service=WFS&version=1.0.0&request=GetFeature&typeName=sicar%3Asicar_imoveis_${sigla}&outputFormat=${tipoArquivo}`;
 
-    // Usa cheerio para parsear o HTML e encontrar os links
-    const $ = cheerio.load(data);
+    // Nome do arquivo salvo localmente
+    const fileName = `sicar_imoveis_${sigla}.${tipoArquivo}`;
 
-    // Busca todos os links que contêm 'outputFormat=text/csv' no href
-    const promises = [];
-    $('table.layerTable tr').each((index, element) => {
-      const layerName = $(element).find('td.layerTitle a').text().trim();
-      const csvLink = $(element).find('td.layerActions a[href*="outputFormat=text/csv"]').attr('href');
-
-      if (csvLink) {
-        const fullLink = `https://geoserver.car.gov.br${csvLink}`;
-        const fileName = `${layerName}.csv`;
-
-        console.log(`Baixando arquivo CSV para a camada: ${layerName}`);
-        
-        // Adiciona a promessa do download à lista
-        promises.push(downloadCSV(fullLink, fileName).then(() => {
-          console.log(`Download concluído para a camada: ${layerName}`);
-        }).catch(err => {
-          console.log(`Erro ao baixar CSV para a camada ${layerName}:`, err);
-        }));
-      } else {
-        console.log(`Não foi encontrado link CSV para a camada: ${layerName}`);
-      }
-    });
-
-    // Espera que todas as promessas de download sejam concluídas
-    await Promise.all(promises);
-  } catch (error) {
-    console.error('Erro ao carregar a página ou baixar os arquivos:', error);
+    try {
+      console.log(`Baixando arquivo para ${sigla}...`);
+      await downloadFile(url, fileName);
+      console.log(`Download concluído para ${sigla}`);
+    } catch (error) {
+      console.error(`Erro ao baixar arquivo para ${sigla}:`, error.message);
+    }
   }
 }
 
-// Executa a função de download
-downloadCSVFiles().then(() => {
-  console.log('Todos os downloads concluídos.');
-}).catch(err => {
-  console.error('Erro ao executar o download:', err);
-});
+// Executa a função principal
+downloadFiles()
+  .then(() => console.log('Todos os downloads foram concluídos.'))
+  .catch(err => console.error('Erro ao executar os downloads:', err));
